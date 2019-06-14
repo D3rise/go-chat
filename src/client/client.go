@@ -9,21 +9,21 @@ import (
 	"os"
 	"time"
 
+	"./structs"
+
 	"golang.org/x/net/websocket"
 )
 
 func main() {
 	flag.Parse()
 
-	ws, err := connect()
+	ws, err := connect("https://localhost:9000")
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Successfully connected")
 
-	defer ws.Close()
-
-	var m Message
+	var m structs.Message
 	go func() {
 		for {
 			err := websocket.JSON.Receive(ws, &m)
@@ -32,19 +32,37 @@ func main() {
 				break
 			}
 
-			fmt.Printf("Message: \"%s\"", m)
+			log.Printf("<%s>: \"%s\"\n", m.Author, m.Text)
+			fmt.Print("> ")
 		}
 	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
+
+	fmt.Print("Username: ")
+	scanner.Scan()
+	login := scanner.Text()
+	fmt.Print("\nPassword: ")
+	scanner.Scan()
+	password := scanner.Text()
+
+	user := structs.User{
+		Login:    login,
+		Password: password,
+	}
+
+	websocket.JSON.Send(ws, user)
+	fmt.Print("> ")
+
 	for scanner.Scan() {
 		text := scanner.Text()
 		if text == "" {
 			continue
 		}
 
-		m := Message{
-			Text: text,
+		m := structs.Message{
+			Text:   text,
+			Author: login,
 		}
 
 		err = websocket.JSON.Send(ws, m)
@@ -56,16 +74,11 @@ func main() {
 	}
 }
 
-// Message struct
-type Message struct {
-	Text string `json:"text"`
-}
-
 var (
 	port = flag.String("port", "9000", "port used for ws connection")
 )
 
-func connect() (*websocket.Conn, error) {
+func connect(address string) (*websocket.Conn, error) {
 	return websocket.Dial(fmt.Sprintf("ws://localhost:%s", *port), "", mockedIP())
 }
 

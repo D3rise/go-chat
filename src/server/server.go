@@ -2,28 +2,18 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
+
+	"./structs"
 
 	"golang.org/x/net/websocket"
 )
 
 func main() {
 	flag.Parse()
+	log.Println("Server listening on address: localhost:", *port)
 	log.Fatal(server(*port))
-}
-
-// Message struct
-type Message struct {
-	Text string `json:"text"`
-}
-
-type hub struct {
-	clients        map[string]*websocket.Conn
-	addClientCh    chan *websocket.Conn
-	removeClientCh chan *websocket.Conn
-	broadcastCh    chan Message
 }
 
 var (
@@ -31,7 +21,7 @@ var (
 )
 
 func server(port string) error {
-	h := newHub()
+	h := structs.NewHub()
 	mux := http.NewServeMux()
 	mux.Handle("/", websocket.Handler(func(ws *websocket.Conn) {
 		handler(ws, h)
@@ -41,65 +31,21 @@ func server(port string) error {
 	return s.ListenAndServe()
 }
 
-func handler(ws *websocket.Conn, h *hub) {
-	go h.run()
+func handler(ws *websocket.Conn, h *structs.Hub) {
+	go h.Run()
 
-	h.addClientCh <- ws
+	var u structs.User
+	websocket.JSON.Receive(ws, &u)
+
+	h.AddClientCh <- ws
 
 	for {
-		var m Message
+		var m structs.Message
 		err := websocket.JSON.Receive(ws, &m)
 		if err != nil {
-			h.broadcastCh <- Message{err.Error()}
-			h.removeClient(ws)
+			h.RemoveClient(ws)
 			return
 		}
-		h.broadcastCh <- m
+		h.BroadcastCh <- m
 	}
-}
-
-func newHub() *hub {
-	return &hub{
-		clients:        make(map[string]*websocket.Conn),
-		addClientCh:    make(chan *websocket.Conn),
-		removeClientCh: make(chan *websocket.Conn),
-		broadcastCh:    make(chan Message),
-	}
-}
-
-func (h *hub) run() {
-	for {
-		select {
-		case conn := <-h.addClientCh:
-			h.addClient(conn)
-
-		case conn := <-h.removeClientCh:
-			h.removeClient(conn)
-
-		case m := <-h.broadcastCh:
-			h.broadcastMessage(m)
-		}
-	}
-}
-
-func (h *hub) broadcastMessage(m Message) {
-	for _, conn := range h.clients {
-		err := websocket.JSON.Send(conn, m)
-
-		fmt.Printf("New message: %s", m)
-
-		if err != nil {
-			fmt.Printf("Error broadcasting message: ", err)
-			return
-		}
-	}
-}
-
-func (h *hub) removeClient(conn *websocket.Conn) {
-	delete(h.clients, conn.LocalAddr().String())
-	fmt.Println("Client disconnected.")
-}
-func (h *hub) addClient(conn *websocket.Conn) {
-	h.clients[conn.RemoteAddr().String()] = conn
-	fmt.Println("New client!")
 }
